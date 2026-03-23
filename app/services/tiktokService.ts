@@ -127,7 +127,9 @@ class TikTokService {
       case 'offline':
         await this.roomInfo();
 
-        if (this.viewers > 1) {
+        // Was hardcoded `> 1`, which skipped many real lives (solo / low viewer count).
+        const needViewers = Math.max(1, this.minViewers);
+        if (this.viewers >= needViewers) {
           if (!this.usingProxy || this.proxyType === 'socks5') {
             const connect = await this.connectToChat();
 
