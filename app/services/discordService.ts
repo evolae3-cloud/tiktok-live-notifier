@@ -1,6 +1,9 @@
 import IDiscordService from "../interfaces/iDiscordService";
 import ILogger from "../interfaces/iLogger";
-const { Client, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Events, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+
+/** Hot pink for embed sidebar (Discord integer color). */
+const EMBED_PINK = 0xff69b4;
 
 class DiscordService implements IDiscordService {
     public message: string = '';
@@ -11,6 +14,9 @@ class DiscordService implements IDiscordService {
     private debug: boolean = false;
     private log: boolean = false;
     private logger: ILogger;
+    private embedTitle: string;
+    /** Role to ping above the embed; unset env defaults to AppleStoreQueen live-alert role. Set DISCORD_ROLE_ID= to empty to disable. */
+    private roleIdToPing: string;
 
      constructor(token: String, channelId: string, debug: boolean, enableLogs: boolean, logger: ILogger) {
         this.token = token;
@@ -18,6 +24,10 @@ class DiscordService implements IDiscordService {
         this.debug = debug;
         this.log = enableLogs;
         this.logger = logger;
+        this.embedTitle = (process.env.DISCORD_EMBED_TITLE || 'TikTok Live').trim() || 'TikTok Live';
+        const roleEnv = process.env.DISCORD_ROLE_ID;
+        this.roleIdToPing =
+            roleEnv !== undefined ? String(roleEnv).trim() : '1485140538704396400';
         this.client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
         this.clientReady();
@@ -34,8 +44,26 @@ class DiscordService implements IDiscordService {
             await this.waitForClientReady();
             const channel = await this.client.channels.fetch(this.channelId);
             if (channel) {
-                await channel.send(message);
-                
+                const embed = new EmbedBuilder()
+                    .setTitle(this.embedTitle)
+                    .setDescription(message)
+                    .setColor(EMBED_PINK)
+                    .setTimestamp()
+                    .setFooter({ text: 'TikTok Live Notifier' });
+
+                const payload: {
+                    embeds: InstanceType<typeof EmbedBuilder>[];
+                    content?: string;
+                    allowedMentions?: { parse: []; roles: string[] };
+                } = { embeds: [embed] };
+
+                if (this.roleIdToPing) {
+                    payload.content = `<@&${this.roleIdToPing}>`;
+                    payload.allowedMentions = { parse: [], roles: [this.roleIdToPing] };
+                }
+
+                await channel.send(payload);
+
                 if (this.debug) {
                     console.info('Message sent successfully!');
                 }

@@ -1,4 +1,55 @@
 import express, { Request, Response } from 'express';
+
+/**
+ * TikTok live connector expects the profile "uniqueId" (the @handle without @).
+ * You can set either TIKTOK_PROFILE_URL (paste browser URL) or TIKTOK_USERNAME.
+ * If someone changes their @handle, the URL changes — update this once (not auto-magic).
+ */
+function resolveTikTokUniqueId(profileUrl: string, username: string): string {
+  const url = String(profileUrl || '').trim();
+  if (url) {
+    const m = url.match(/tiktok\.com\/@([^/?#]+)/i);
+    if (m && m[1]) {
+      return decodeURIComponent(m[1]).replace(/^@/, '');
+    }
+    throw new Error(
+      'TIKTOK_PROFILE_URL is set but no @handle found. Use e.g. https://www.tiktok.com/@theirhandle'
+    );
+  }
+  const u = String(username || '').trim().replace(/^@/, '');
+  return u;
+}
+
+/** One entry = full profile URL or bare @handle (no URL). Comma, newline, or | separated. */
+function parseTikTokProfileSegment(segment: string): string {
+  const s = String(segment || '').trim();
+  if (!s) return '';
+  if (/tiktok\.com\//i.test(s)) {
+    return resolveTikTokUniqueId(s, '');
+  }
+  return s.replace(/^@/, '').trim();
+}
+
+/** Multiple accounts: set TIKTOK_PROFILE_URLS. Single: TIKTOK_PROFILE_URL or TIKTOK_USERNAME. */
+function parseAllTikTokUniqueIds(): string[] {
+  const multi = (process.env.TIKTOK_PROFILE_URLS || '').trim();
+  if (multi) {
+    const raw = multi.split(/[,\n|]+/);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const part of raw) {
+      const id = parseTikTokProfileSegment(part);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        out.push(id);
+      }
+    }
+    return out;
+  }
+  const one = resolveTikTokUniqueId(process.env.TIKTOK_PROFILE_URL || '', process.env.TIKTOK_USERNAME || '');
+  return one ? [one] : [];
+}
+
 import Logger from './utils/logger';
 import DiscordService from './services/discordService';
 import TikTokService from './services/tiktokService';
@@ -9,7 +60,7 @@ import DatabaseService from './services/databaseService';
 class App {
   private enableLogs: boolean;
   private debug: boolean;
-  private username: string;
+  private tiktokUniqueIds: string[];
   private useVariableInterval: boolean;
   private defaultInterval: number;
   private minInterval: number;
@@ -30,7 +81,7 @@ class App {
   private channelId: string;
   private discordMessage: string;
 
-  private tikTokService: TikTokService;
+  private tikTokServices: TikTokService[];
   private logger: ILogger;
 
   constructor() {
@@ -38,7 +89,7 @@ class App {
 
     this.enableLogs = process.env.ENABLE_LOGS === 'true';
     this.debug = process.env.DEBUG === 'true';
-    this.username = process.env.TIKTOK_USERNAME || '';
+    this.tiktokUniqueIds = parseAllTikTokUniqueIds();
     this.useVariableInterval = process.env.USE_VARIABLE_INTERVAL === 'true';
     this.defaultInterval = process.env.DEFAULT_INTERVAL_IN_SECONDS ? parseInt(process.env.DEFAULT_INTERVAL_IN_SECONDS) * 1000 : 60000;
     this.minInterval = process.env.MIN_INTERVAL_IN_SECONDS ? parseInt(process.env.MIN_INTERVAL_IN_SECONDS) * 1000 : 60000;
@@ -58,8 +109,10 @@ class App {
     this.channelId = process.env.DISCORD_CHANNEL_ID || '';
     this.discordMessage = process.env.DISCORD_MESSAGE || '';
 
-    if (this.username === '') {
-      throw new Error('Please set TIKTOK_USERNAME environment variable');
+    if (this.tiktokUniqueIds.length === 0) {
+      throw new Error(
+        'Set TIKTOK_PROFILE_URLS (comma-separated URLs) or TIKTOK_PROFILE_URL or TIKTOK_USERNAME — see README'
+      );
     }
 
     if (this.useSentry && this.sentryDsn === '') {
@@ -93,19 +146,26 @@ class App {
     discordService.message = this.discordMessage;
 
     const databaseService = new DatabaseService(this.sqliteDbPath, this.debug, this.enableLogs, this.logger);
-    this.tikTokService = new TikTokService({
-      username: this.username,
-      discordService: discordService,
-      databaseService: databaseService,
-      minViewers: this.minViewers,
-      minUpdateInterval: this.minUpdateInterval,
-      proxyAccess: this.proxyAccess,
-      proxyType: this.proxyType,
-      proxyTimeout: this.proxyTimeout,
-      debug: this.debug,
-      log: this.enableLogs,
-      logger: this.logger
-    });
+    this.tikTokServices = this.tiktokUniqueIds.map(
+      (username) =>
+        new TikTokService({
+          username,
+          discordService: discordService,
+          databaseService: databaseService,
+          minViewers: this.minViewers,
+          minUpdateInterval: this.minUpdateInterval,
+          proxyAccess: this.proxyAccess,
+          proxyType: this.proxyType,
+          proxyTimeout: this.proxyTimeout,
+          debug: this.debug,
+          log: this.enableLogs,
+          logger: this.logger
+        })
+    );
+
+    console.log(
+      `[tiktok-live-notifier] Monitoring ${this.tikTokServices.length} account(s): ${this.tiktokUniqueIds.map((u) => '@' + u).join(', ')}`
+    );
 
     if (this.useExpress) {
       this.expressApp = express();
@@ -131,16 +191,20 @@ class App {
   }
 
   private async forceConnectToChat(): Promise<void> {
-    const isConnected = await this.tikTokService.connectToChat();
-    if (isConnected) {
-      this.tikTokService.startChatListener();
+    for (const svc of this.tikTokServices) {
+      const isConnected = await svc.connectToChat();
+      if (isConnected) {
+        svc.startChatListener();
+      }
     }
   }
 
   private setupExpressRoutes(): void {
     this.expressApp!.get(this.endpoint, async (req: Request, res: Response) => {
       try {
-        await this.tikTokService.runViaExpress();
+        for (const svc of this.tikTokServices) {
+          await svc.runViaExpress();
+        }
         res.status(200).json({ message: 'TikTok service executed successfully.' });
       } catch (error: any) {
         res.status(500).json({ message: 'There was an error while processing the request. Please check the error log.' });
@@ -159,7 +223,9 @@ class App {
 
     const runWithVariableInterval = () => {
       try {
-        this.tikTokService.runViaInterval();
+        for (const svc of this.tikTokServices) {
+          svc.runViaInterval();
+        }
       } catch (error: any) {
         clearInterval(interval);
         callback(error);

@@ -166,8 +166,8 @@ class TikTokService {
   async isLiveStreaming() {
     const currentTime = Math.floor(Date.now() / 1000);
     const startedTime = this.createTimestamp;
-    const lastUpdate: number = await this.databaseService.get('lastUpdate') || 0;
-    const lastUpdateStartedTime: number = await this.databaseService.get('lastUpdateStartedTime') || 0;
+    const lastUpdate: number = (await this.databaseService.get(this.kv('lastUpdate'))) || 0;
+    const lastUpdateStartedTime: number = (await this.databaseService.get(this.kv('lastUpdateStartedTime'))) || 0;
     let isLive = false;
 
     const validateLastUpdate: boolean = (lastUpdate + this.minUpdateInterval) < currentTime;
@@ -175,14 +175,14 @@ class TikTokService {
     const validateViewers: boolean = this.viewers >= this.minViewers;
 
     if (validateLastUpdate && validateLastUpdateStartedTime && validateViewers) {
-      await this.databaseService.set('lastUpdate', currentTime);
-      await this.databaseService.set('lastUpdateStartedTime', startedTime);
+      await this.databaseService.set(this.kv('lastUpdate'), currentTime);
+      await this.databaseService.set(this.kv('lastUpdateStartedTime'), startedTime);
 
       this.discordService.sendMessage(this.discordService.getMessage());
       this.status = 'connected';
       isLive = true;
     } else if (validateViewers) {
-      await this.databaseService.set('lastUpdate', currentTime);
+      await this.databaseService.set(this.kv('lastUpdate'), currentTime);
     }
 
     return isLive;
@@ -316,13 +316,13 @@ class TikTokService {
 
       const currentTime = Math.floor(Date.now() / 1000);
       const startedTimestamp = state.roomInfo.create_time;
-      const lastUpdate = await this.databaseService.get('lastUpdate');
-      const lastUpdateStartedTime = await this.databaseService.get('lastUpdateStartedTime');
+      const lastUpdate = (await this.databaseService.get(this.kv('lastUpdate'))) || 0;
+      const lastUpdateStartedTime = (await this.databaseService.get(this.kv('lastUpdateStartedTime'))) || 0;
 
-      await this.databaseService.set('lastUpdate', currentTime);
+      await this.databaseService.set(this.kv('lastUpdate'), currentTime);
 
       if ((lastUpdate + this.minUpdateInterval) < currentTime && startedTimestamp != lastUpdateStartedTime) {
-        await this.databaseService.set('lastUpdateStartedTime', startedTimestamp);
+        await this.databaseService.set(this.kv('lastUpdateStartedTime'), startedTimestamp);
         this.discordService.sendMessage(this.discordService.getMessage());
       }
 
@@ -368,6 +368,11 @@ class TikTokService {
         this.logger.log(err);
       }
     });
+  }
+
+  /** Per-TikTok-account keys so multiple streamers can share one SQLite DB. */
+  private kv(suffix: string): string {
+    return `tiktok:${this.username}:${suffix}`;
   }
 }
 
