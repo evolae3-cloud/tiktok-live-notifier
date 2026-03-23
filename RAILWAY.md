@@ -13,11 +13,19 @@ Your PC does **not** need to stay on. Railway runs `npm start` in the cloud.
 
 4. Click your **service** → **Variables** → add **each** line from your local `.env` as a separate variable (same names, same values):
 
+   **Option A — Webhook (same as IG/FB bot, no Discord bot token)**  
+   - Set **`DISCORD_WEBHOOK_URL`** = your channel webhook URL (`https://discord.com/api/webhooks/...`).  
+   - **Do not** set `DISCORD_TOKEN` or `DISCORD_CHANNEL_ID` (remove them if present).
+
+   **Option B — Discord bot**  
+   - Set **`DISCORD_TOKEN`** and **`DISCORD_CHANNEL_ID`** (do **not** set `DISCORD_WEBHOOK_URL`).
+
    | Variable | Example |
    |----------|---------|
    | `TIKTOK_PROFILE_URLS` | `https://www.tiktok.com/@a,https://www.tiktok.com/@b` |
-   | `DISCORD_TOKEN` | (bot token) |
-   | `DISCORD_CHANNEL_ID` | (channel id) |
+   | `DISCORD_WEBHOOK_URL` | `https://discord.com/api/webhooks/...` (Option A) |
+   | `DISCORD_TOKEN` | (Option B only) |
+   | `DISCORD_CHANNEL_ID` | (Option B only) |
    | `DISCORD_ROLE_ID` | `1485140538704396400` |
    | `DISCORD_MESSAGE` | Your text |
    | `DISCORD_EMBED_TITLE` | Optional custom title |

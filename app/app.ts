@@ -128,12 +128,14 @@ class App {
       throw new Error('Proxy type must be http or socks5');
     }
 
-    if (this.discordToken === '') {
-      throw new Error('Please set DISCORD_TOKEN environment variable');
-    }
-
-    if (this.channelId === '') {
-      throw new Error('Please set DISCORD_CHANNEL_ID environment variable');
+    const useDiscordWebhook = (process.env.DISCORD_WEBHOOK_URL || '').trim() !== '';
+    if (!useDiscordWebhook) {
+      if (this.discordToken === '') {
+        throw new Error('Set DISCORD_WEBHOOK_URL (like IG/FB bot) or DISCORD_TOKEN for a Discord bot');
+      }
+      if (this.channelId === '') {
+        throw new Error('Please set DISCORD_CHANNEL_ID when using DISCORD_TOKEN (not needed for webhooks)');
+      }
     }
 
     if (this.discordMessage === '') {
